@@ -26,6 +26,7 @@ func main() {
 		log.Fatal("DB_URL must be set")
 	}
 	platform := os.Getenv("PLATFORM")
+	jwtSecret := os.Getenv("JWT_SECRET")
 
 	// 2. Connect to the database.
 	// sql.Open only checks the settings. Ping actually talks to Postgres,
@@ -40,8 +41,9 @@ func main() {
 
 	// 3. Build the shared config that handlers use.
 	apiCfg := &apiConfig{
-		db:       database.New(dbConn),
-		platform: platform,
+		db:        database.New(dbConn),
+		platform:  platform,
+		jwtSecret: jwtSecret,
 	}
 
 	// 4. Register routes.
@@ -57,6 +59,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirp)
 
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
+	mux.HandleFunc("POST /api/login", apiCfg.handlerLoginUser)
 
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/AaryanCode69/chirpy/internal/auth"
 	"github.com/AaryanCode69/chirpy/internal/database"
 )
 
@@ -40,6 +41,18 @@ func (cfg *apiConfig) handlerValidateAndSaveChirp(w http.ResponseWriter, r *http
 		CleanedBody string `json:"cleaned_body"`
 	}
 
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid JWT", err)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Invalid JWT", err)
+		return
+	}
+
 	params := parameters{}
 	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Couldn't decode parameters", err)
@@ -56,7 +69,7 @@ func (cfg *apiConfig) handlerValidateAndSaveChirp(w http.ResponseWriter, r *http
 
 	chirp, err := cfg.db.SendChirp(r.Context(), database.SendChirpParams{
 		Body:   cleanedMsg,
-		UserID: params.UserID,
+		UserID: userID,
 	})
 	if err != nil {
 		respondWithError(w, 500, "Failed to Execute Databse Query", err)
