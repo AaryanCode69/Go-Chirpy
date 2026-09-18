@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -86,10 +87,29 @@ func (cfg *apiConfig) handlerValidateAndSaveChirp(w http.ResponseWriter, r *http
 }
 
 func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
-	dbChirps, err := cfg.db.GetAllChirps(r.Context())
-	if err != nil {
-		respondWithError(w, 500, "Failed to execute Database Query", err)
-		return
+	authorID := r.URL.Query().Get("author_id")
+	sortOrder := r.URL.Query().Get("sort")
+
+	var dbChirps []database.Chirp
+	var err error
+
+	if authorID == "" {
+		dbChirps, err = cfg.db.GetAllChirps(r.Context())
+		if err != nil {
+			respondWithError(w, 500, "Failed to execute Database Query", err)
+			return
+		}
+	} else {
+		userID, err := uuid.Parse(authorID)
+		if err != nil {
+			respondWithError(w, 400, "Invalid UserId", err)
+			return
+		}
+		dbChirps, err = cfg.db.GetAllChirpsByUserID(r.Context(), userID)
+		if err != nil {
+			respondWithError(w, 500, "Failed to execute Database Query", err)
+			return
+		}
 	}
 
 	chirps := make([]Chirp, len(dbChirps))
@@ -101,6 +121,12 @@ func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request
 			Body:      dbChirp.Body,
 			UserID:    dbChirp.UserID.String(),
 		}
+	}
+
+	if sortOrder == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		})
 	}
 
 	respondWithJSON(w, 200, chirps)
