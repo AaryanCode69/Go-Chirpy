@@ -131,6 +131,44 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (cfg *apiConfig) handleDeleteChirpById(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Invalid JWT", err)
+		return
+	}
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 400, "invalid userId", err)
+		return
+	}
+
+	chirp, err := cfg.db.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, "Chirp Not Found", err)
+		return
+	}
+
+	if chirp.UserID != userID {
+		respondWithError(w, 403, "Can't Delete Chirp of Another User", err)
+		return
+	}
+
+	err = cfg.db.DeleteChirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, "Chirp Not Found", err)
+		return
+	}
+
+	respondWithJSON(w, 204, nil)
+}
+
 // cleanBody replaces each bad word with "****".
 // It has no HTTP code in it, so it is easy to unit test.
 func cleanBody(body string) string {

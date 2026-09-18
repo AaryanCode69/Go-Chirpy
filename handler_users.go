@@ -12,11 +12,12 @@ import (
 // User is what we send back to the client.
 // It is separate from database.User so we control exactly what gets shown.
 type User struct {
-	ID        string    `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token"`
+	ID           string    `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 // handlerCreateUser reads an email from the request and saves a new user.
@@ -61,9 +62,8 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 
 func (cfg *apiConfig) handlerLoginUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
-		ExpiresInSeconds int64  `json:"expires_in_seconds"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 
 	params := parameters{}
@@ -74,10 +74,6 @@ func (cfg *apiConfig) handlerLoginUser(w http.ResponseWriter, r *http.Request) {
 	if params.Email == "" {
 		respondWithError(w, http.StatusBadRequest, "Email is required", nil)
 		return
-	}
-
-	if params.ExpiresInSeconds == 0 || params.ExpiresInSeconds >= 3600 {
-		params.ExpiresInSeconds = 3600
 	}
 
 	user, err := cfg.db.FindUserByEmail(r.Context(), params.Email)
@@ -97,9 +93,127 @@ func (cfg *apiConfig) handlerLoginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(params.ExpiresInSeconds)*time.Second)
+	jwtToken, err := auth.MakeJWT(user.ID, cfg.jwtSecret, time.Duration(3600)*time.Second)
 	if err != nil {
 		respondWithError(w, 500, "Error Creating JWT", err)
+		return
+	}
+
+	token := auth.MakeRefreshToken()
+	refreshToken, err := cfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     token,
+		UserID:    user.ID,
+		ExpiresAt: time.Now().UTC().Add(60 * 24 * time.Hour),
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create RefreshToken", err)
+		return
+	}
+
+	respondWithJSON(w, 200, User{
+		ID:           user.ID.String(),
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        jwtToken,
+		RefreshToken: refreshToken.Token,
+	})
+}
+
+func (cfg *apiConfig) handleTokenRefresh(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	refreshToken, err := cfg.db.GetRefreshTokenByToken(r.Context(), bearerToken)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	if refreshToken.ExpiresAt.Before(time.Now().UTC()) || refreshToken.RevokedAt.Valid {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	accessToken, err := auth.MakeJWT(refreshToken.UserID, cfg.jwtSecret, time.Duration(60)*time.Minute)
+	if err != nil {
+		respondWithError(w, 500, "Error Creating Access Token", err)
+		return
+	}
+
+	respondWithJSON(w, 200, struct {
+		Token string `json:"token"`
+	}{
+		Token: accessToken,
+	})
+}
+
+func (cfg *apiConfig) handlerRevokeToken(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	refreshToken, err := cfg.db.GetRefreshTokenByToken(r.Context(), bearerToken)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	_, err = cfg.db.RevokeTokenByToken(r.Context(), refreshToken.Token)
+	if err != nil {
+		respondWithError(w, 500, "Error Updating Refresh Token", err)
+		return
+	}
+
+	respondWithJSON(w, 204, nil)
+}
+
+func (cfg *apiConfig) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
+	bearerToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid Refresh Token", err)
+		return
+	}
+
+	userID, err := auth.ValidateJWT(bearerToken, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Invalid JWT", err)
+		return
+	}
+
+	type parameters struct {
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	params := parameters{}
+
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't decode parameters", err)
+		return
+	}
+	if params.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "Email is required", nil)
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't Hash Password", err)
+		return
+	}
+
+	user, err := cfg.db.UpdateUserById(r.Context(), database.UpdateUserByIdParams{
+		Email:          params.Email,
+		HashedPassword: hashedPassword,
+		ID:             userID,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't Save in DB", err)
 		return
 	}
 
@@ -108,6 +222,5 @@ func (cfg *apiConfig) handlerLoginUser(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
-		Token:     jwtToken,
 	})
 }
