@@ -27,6 +27,7 @@ func main() {
 	}
 	platform := os.Getenv("PLATFORM")
 	jwtSecret := os.Getenv("JWT_SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 
 	// 2. Connect to the database.
 	// sql.Open only checks the settings. Ping actually talks to Postgres,
@@ -44,6 +45,7 @@ func main() {
 		db:        database.New(dbConn),
 		platform:  platform,
 		jwtSecret: jwtSecret,
+		polkaKey:  polkaKey,
 	}
 
 	// 4. Register routes.
@@ -57,11 +59,13 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerValidateAndSaveChirp)
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetAllChirps)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirp)
-	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handleDeleteChirpById)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handleDeleteChirpByID)
 
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLoginUser)
 	mux.HandleFunc("PUT /api/users", apiCfg.handleUserUpdate)
+
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handleUserUpgrade)
 
 	mux.HandleFunc("POST /api/refresh", apiCfg.handleTokenRefresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevokeToken)

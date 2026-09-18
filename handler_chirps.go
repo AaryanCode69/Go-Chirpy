@@ -131,7 +131,7 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (cfg *apiConfig) handleDeleteChirpById(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handleDeleteChirpByID(w http.ResponseWriter, r *http.Request) {
 	bearerToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, 401, "Invalid Refresh Token", err)

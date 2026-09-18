@@ -7,6 +7,7 @@ import (
 
 	"github.com/AaryanCode69/chirpy/internal/auth"
 	"github.com/AaryanCode69/chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
 // User is what we send back to the client.
@@ -18,6 +19,7 @@ type User struct {
 	Email        string    `json:"email"`
 	Token        string    `json:"token"`
 	RefreshToken string    `json:"refresh_token"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 }
 
 // handlerCreateUser reads an email from the request and saves a new user.
@@ -53,10 +55,11 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 	}
 
 	respondWithJSON(w, http.StatusCreated, User{
-		ID:        user.ID.String(),
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+		ID:          user.ID.String(),
+		CreatedAt:   user.CreatedAt,
+		UpdatedAt:   user.UpdatedAt,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	})
 }
 
@@ -117,6 +120,7 @@ func (cfg *apiConfig) handlerLoginUser(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        jwtToken,
 		RefreshToken: refreshToken.Token,
+		IsChirpyRed:  user.IsChirpyRed,
 	})
 }
 
@@ -223,4 +227,50 @@ func (cfg *apiConfig) handleUserUpdate(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
 	})
+}
+
+func (cfg *apiConfig) handleUserUpgrade(w http.ResponseWriter, r *http.Request) {
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Invalid ApiKey", err)
+		return
+	}
+
+	if apiKey != cfg.polkaKey {
+		respondWithError(w, 401, "Invalid ApiKey", err)
+		return
+	}
+
+	type parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+
+	params := parameters{}
+
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't decode parameters", err)
+		return
+	}
+
+	if params.Event != "user.upgraded" {
+		respondWithJSON(w, 204, nil)
+		return
+	}
+
+	id, err := uuid.Parse(params.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't decode UUID", err)
+		return
+	}
+
+	_, err = cfg.db.UpgradeUserById(r.Context(), id)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "user doesn't exist", err)
+		return
+	}
+
+	respondWithJSON(w, 204, nil)
 }
